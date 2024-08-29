@@ -4,7 +4,9 @@ import time
 from onvif import ONVIFCamera
 from zeep import Client
 import cv2 as cv
-                                                        
+import numpy as np
+import time
+
 XMAX = 1                        
 XMIN = -1
 YMAX = 1
@@ -72,47 +74,71 @@ def continuous_move():
     
     cap = Video_Capture('rtsp://admin:admin123@192.168.1.108')
 
-    positions = [
-        (0.3, 0.0),   # Угол 0°
-        (0.5, 0.0),   # Угол 90°
-        (0.7, 0.0),   # Угол 180°
-        (0.9, 0.0)    # Угол 270°
-    ]
-    
-    angles = [0, 90, 180, 270]
+    default_pan = 0.10583333333333345                               # стандартные значения положения камеры
+    default_tilt = 0.6659047619047618
+    default_zoom = 0.6466666666666666
+
+    print(f"Стандартное положение камеры: Pan: {default_pan}, Tilt: {default_tilt}, Zoom: {default_zoom}")
+
+    angles = [0, 90, 180, 270] 
     snapshots = []
+    
+    moverequest = ptz.create_type('AbsoluteMove')
+    moverequest.ProfileToken = media_profile.token
+    moverequest.Position = ptz.GetStatus({'ProfileToken': media_profile.token}).Position
+    
+    Start = time.time()
+    
+    reverse = False
+    delta_x = 0.06
+    for i in range (8):
+        if reverse == True:
+            default_pan -= delta_x 
+        else: default_pan += delta_x
 
-    for pos, angle in zip(positions, angles):                  # Устанавливаем позицию камеры
-        moverequest = ptz.create_type('AbsoluteMove')
-        moverequest.ProfileToken = media_profile.token
-        moverequest.Position = ptz.GetStatus({'ProfileToken': media_profile.token}).Position
+        if i == 3:
+            reverse = True
+            
+        end = time.time()
+        print("Время выполнения кода:", end-Start, "секунд(ы)")
 
-        moverequest.Position.PanTilt.x = pos[0]
-        moverequest.Position.PanTilt.y = pos[1]
+        moverequest.Position.PanTilt.x = default_pan
+        moverequest.Position.PanTilt.y = default_tilt
         
         ptz.AbsoluteMove(moverequest)                           # Выполняем движение камеры
 
-        cv.waitKey(500)                                         #  Время поворота
+        cv.waitKey(300)
         
-        #time.sleep(1)
-
         frame = cap.read()                                      # Захват кадра и сохранение
         print(f'{cap} считал')
-        filename = f"camera_snapshot_{angle}.jpg"
-        cv.imwrite(filename, frame)                             # Сохраняем кадр
+        # filename = f"camera_snapshot_{angle}.jpg"
+        # cv.imwrite(filename, frame)                           # Сохраняем кадр
         snapshots.append(frame)                                 # Добавляем кадр в список
-
-    for i, snapshot in enumerate(snapshots):
-        cv.imshow(f'Snapshot {angles[i]}°', snapshot)
-
+    
+    end = time.time()
+    print("Общее Время выполнения кода:", end-Start, "секунд(ы)")
+    
+    collage = create_collage(snapshots, angles + angles[::-1])  # Создаем панораму из всех снимков
+    cv.imshow("Collage", collage)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
-    moverequest.Position.PanTilt.x = 0.0                        # Возвращаем камеру в исходное положение           
-    moverequest.Position.PanTilt.y = 0.0
-    moverequest.Position.Zoom.x = 0.0
-    ptz.AbsoluteMove(moverequest)
-    
+def create_collage(snapshots, angles):
+                                                                                        # Вычисляем размеры для коллажа
+    width = 640                                                                         # Ширина каждого снимка
+    height = 480                                                                        # Высота каждого снимка
+    collage_height = height * 2                                                         # Высота коллажа для двух рядов
+    collage = np.zeros((collage_height, width * len(snapshots), 3), dtype=np.uint8)     # Создаем пустое изображение для коллажа
+
+    for i, snapshot in enumerate(snapshots):
+        resized_snapshot = cv.resize(snapshot, (width, height))                     # Изменяем размер снимка
+        if i < 4:
+            collage[0:height, i * width:(i + 1) * width] = resized_snapshot         # Вставляем снимок в верхний ряд
+        else:
+            collage[height:collage_height, (i - 4) * width:((i - 4) + 1) * width] = resized_snapshot  # Вставляем снимок в нижний ряд
+        cv.putText(collage, f"{angles[i]}°", (i * width + 10, 30 if i < 4 else height + 30), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)  # Добавляем угол поворота
+
+    return collage
+
 if __name__ == '__main__':
-    
     continuous_move()
